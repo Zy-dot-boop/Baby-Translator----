@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>👶 Baby Sound Translator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 2rem;
+      background-color: #f9f9f9;
+    }
+
+    #result {
+      font-size: 1.5rem;
+      margin-top: 20px;
+      color: #2c3e50;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 1rem;
+      margin: 5px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      background-color: #4a90e2;
+      color: white;
+    }
+
+    button:hover {
+      background-color: #3a78c2;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎤 Baby Sound Translator</h1>
+
+  <button onclick="startListening()">Start Listening</button>
+  <button onclick="stopListening()">Stop</button>
+
+  <p id="result">Waiting for input...</p>
+
+  <!-- 👇 Include the Edge Impulse runtime -->
+  <!-- This file comes from the exported WebAssembly bundle -->
+  <script src="edge-impulse-standalone.js"></script>
+
+  <script>
+    let classifier, audioContext, microphone, scriptNode;
+    let buffer = [];
+
+    async function startListening() {
+      // 🔧 Initialize the classifier
+      if (!classifier) {
+        classifier = await EdgeImpulseClassifier.init({
+          // 👇 These paths must match the files in your project folder
+          wasmPath: 'edge-impulse-standalone.wasm', // <- BINARY FILE
+          modelPath: 'model.eim'                    // <- Your exported model
+        });
+      }
+
+      // 🎙️ Get audio input
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      microphone = audioContext.createMediaStreamSource(stream);
+
+      // 🔁 Set up buffer for audio processing
+      scriptNode = audioContext.createScriptProcessor(2048, 1, 1);
+      microphone.connect(scriptNode);
+      scriptNode.connect(audioContext.destination);
+
+      scriptNode.onaudioprocess = async function (event) {
+        const input = event.inputBuffer.getChannelData(0);
+        buffer.push(...input);
+
+        const requiredSamples = classifier.getWindowSize();
+        if (buffer.length >= requiredSamples) {
+          const inputBuffer = buffer.slice(0, requiredSamples);
+          buffer = buffer.slice(requiredSamples);
+
+          try {
+            const result = await classifier.classify(Float32Array.from(inputBuffer));
+            const top = result.classification[0];
+            document.getElementById("result").innerText =
+              `🧠 Detected: ${top.label} (${(top.value * 100).toFixed(1)}%)`;
+          } catch (err) {
+            console.error("Error during classification:", err);
+          }
+        }
+      };
+    }
+
+    function stopListening() {
+      if (scriptNode) scriptNode.disconnect();
+      if (microphone) microphone.disconnect();
+      if (audioContext) audioContext.close();
+      document.getElementById("result").innerText = "Stopped listening.";
+    }
+  </script>
+</body>
+</html>
